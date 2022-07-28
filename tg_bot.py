@@ -1,5 +1,6 @@
 import difflib
 import socket
+from typing import TypedDict
 
 import httpx
 import telebot
@@ -7,6 +8,8 @@ import config
 import utils
 
 # TODO add proxy?
+# TODO add 'help'
+# TODO webhook?
 # TODO add logging
 bot = telebot.TeleBot(config.TOKEN)
 
@@ -42,25 +45,40 @@ schedules = {
     'Удаленная работа': 'remote'
 }
 
-user_vacancy = None
-user_areas = set()
-user_experience = None
-user_salary = None
-user_only_with_salary = None
-user_employments = set()
-user_schedules = set()
-user_period = None
+
+class UserQuery(TypedDict):
+    user_id: int
+    vacancy: str
+    areas: set
+    experience: str
+    salary: int
+    only_with_salary: str
+    employments: set
+    schedules: str
+    period: int
+
+
+# user_vacancy = None
+# user_areas = set()
+# user_experience = None
+# user_salary = None
+# user_only_with_salary = None
+# user_employments = set()
+# user_schedules = set()
+# user_period = None
 
 
 @bot.message_handler(commands=['start'])
 def start(msg):
     global areas
+    # noinspection PyTypeChecker
+    user_query: UserQuery = {'user_id': msg.from_user.id}
 
     try:
         areas = utils.get_areas()
         bot.send_message(msg.chat.id, 'Привет! Давай найдем тебе работу. Какие слова будем искать?',
                          reply_markup=REPLY_KEYBOARD_REMOVE)
-        bot.register_next_step_handler(msg, get_vacancy)
+        bot.register_next_step_handler(msg, get_vacancy, user_query)
     except (httpx.ConnectTimeout, socket.timeout):
         # TODO catch requests.exceptions.ConnectTimeout
         bot.send_message(msg.chat.id, 'У меня какие-то проблемы. Подожди немного, я попробую еще раз.',
@@ -68,21 +86,17 @@ def start(msg):
         start(msg)
 
 
-def get_vacancy(msg):
-    global user_vacancy
-    # TODO check if empty
-    user_vacancy = msg.text
+def get_vacancy(msg, user_query):
+    user_query['vacancy'] = msg.text
     bot.reply_to(msg, 'Записал. Где будем искать? Напиши мне город или страну. '
                       'Можно несколько, но тогда пиши через запятую.')
-    bot.register_next_step_handler(msg, get_area)
+    bot.register_next_step_handler(msg, get_area, user_query)
 
 
-def get_area(msg):
-    global user_areas
-
+def get_area(msg, user_query):
     suggested_areas = []
 
-    # TODO check if msg is empty (only remote work)
+    # TODO check if user wants only remote work
 
     for word in msg.text.split(','):
         if word.lower() not in areas.keys():
@@ -97,8 +111,7 @@ def get_area(msg):
             # TODO {'description': 'text length must be 2 or greater', 'bad_argument': 'text', 'bad_arguments':
             #  [{'name': 'text', 'description': 'text length must be 2 or greater'}],
             #  'errors': [{'value': 'text', 'type': 'bad_argument'}], 'request_id': '1658490563278c88bc33600bdac45c03'}
-            if response['items']:
-                # TODO check if only one item in response
+            if 'items' in response.keys() and response['items']:
                 for item in response['items']:
                     suggested_areas.append(item['text'])
             else:
@@ -108,10 +121,11 @@ def get_area(msg):
                     # noinspection PyUnresolvedReferences
                     suggested_areas.append(words[0].title())
                 else:
-                    # TODO: strange word -> needs further clarification
-                    pass
+                    bot.reply_to(msg, 'Не разобрал. Повтори, пожалуйста.')
+                    # not sure if this is ok
+                    return bot.register_next_step_handler(msg, get_area, user_query)
         else:
-            user_areas.add(areas[word.lower()])
+            user_query['areas'] = areas[word.lower()]
 
     if suggested_areas:
         suggested_areas_keyboard = telebot.types.ReplyKeyboardMarkup()
@@ -122,74 +136,69 @@ def get_area(msg):
         bot.send_message(msg.chat.id, 'Я кое-что не разобрал, позволь уточню.'
                                       'Как закончишь - жми "Далее" в конце списка.',
                          reply_markup=suggested_areas_keyboard)
-        bot.register_next_step_handler(msg, handle_suggested_areas)
+        bot.register_next_step_handler(msg, handle_suggested_areas, user_query)
     else:
-        get_experience(msg)
+        get_experience(msg, user_query)
 
 
-def handle_suggested_areas(msg):
-    global user_areas
-
+def handle_suggested_areas(msg, user_query):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
-            get_experience(msg)
+            get_experience(msg, user_query)
         elif msg.text.lower() in areas.keys():
-            user_areas.add(areas[msg.text.lower()])
-            bot.register_next_step_handler(msg, handle_suggested_areas)
+            user_query['areas'] = areas[msg.text.lower()]
+            bot.register_next_step_handler(msg, handle_suggested_areas, user_query)
         else:
             # TODO
             pass
 
 
-def get_experience(msg):
+def get_experience(msg, user_query):
     experience_keyboard = telebot.types.ReplyKeyboardMarkup()
     for experience in experiences.keys():
         experience_keyboard.add(telebot.types.KeyboardButton(experience))
 
     bot.send_message(msg.chat.id, 'Теперь скажи, какой у тебя опыт?',
                      reply_markup=experience_keyboard)
-    bot.register_next_step_handler(msg, handle_experience)
+    bot.register_next_step_handler(msg, handle_experience, user_query)
 
 
-def handle_experience(msg):
-    global user_experience
-
+def handle_experience(msg, user_query):
     if msg.chat.type == 'private' and msg.text in experiences:
-        user_experience = experiences[msg.text]
-        get_salary(msg)
+        user_query['experience'] = experiences[msg.text]
+        get_salary(msg, user_query)
     else:
         # TODO
         pass
 
 
-def get_salary(msg):
+def get_salary(msg, user_query):
     salary_keyboard = telebot.types.ReplyKeyboardMarkup()
     for salary in only_with_salaries.keys():
         salary_keyboard.add(telebot.types.KeyboardButton(salary))
 
     bot.send_message(msg.chat.id, 'Отлично. А сколько в рублях ты хочешь получать?',
                      reply_markup=salary_keyboard)
-    bot.register_next_step_handler(msg, handle_salary)
+    bot.register_next_step_handler(msg, handle_salary, user_query)
 
 
-def handle_salary(msg):
-    global user_salary, user_only_with_salary
-
+def handle_salary(msg, user_query):
     if msg.chat.type == 'private':
         if msg.text in only_with_salaries.keys():
-            user_only_with_salary = only_with_salaries[msg.text]
-            get_employment(msg)
+            user_query['only_with_salary'] = only_with_salaries[msg.text]
+            get_employment(msg, user_query)
         else:
             try:
                 user_salary = int(msg.text)
                 assert user_salary > 0
-                get_employment(msg)
+                user_query['salary'] = user_salary
+                get_employment(msg, user_query)
             except (ValueError, AssertionError):
                 bot.reply_to(msg, 'Похоже, ты где-то опечатался. Так какую зарплату ты хочешь?')
-                bot.register_next_step_handler(msg, get_salary)
+                bot.register_next_step_handler(msg, get_salary, user_query)
 
 
-def get_employment(msg):
+def get_employment(msg, user_query):
     employment_keyboard = telebot.types.ReplyKeyboardMarkup()
     for employment in employments.keys():
         employment_keyboard.add(telebot.types.KeyboardButton(employment))
@@ -198,28 +207,26 @@ def get_employment(msg):
     bot.send_message(msg.chat.id, 'Какой тип занятости тебя интересуеут?\n'
                                   'Можешь выбрать несколько вариантов, потом жми "Далее".',
                      reply_markup=employment_keyboard)
-    bot.register_next_step_handler(msg, handle_employment)
+    bot.register_next_step_handler(msg, handle_employment, user_query)
 
 
-def handle_employment(msg):
-    global user_employments
-
+def handle_employment(msg, user_query):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
-            get_schedule(msg)
+            get_schedule(msg, user_query)
         elif msg.text in employments.keys():
             if employments[msg.text] is None:
-                user_employments = set()
-                get_schedule(msg)
+                user_query['employments'] = set()
+                get_schedule(msg, user_query)
             else:
-                user_employments.add(employments[msg.text])
-                bot.register_next_step_handler(msg, handle_employment)
+                user_query['employments'] = employments[msg.text]
+                bot.register_next_step_handler(msg, handle_employment, user_query)
         else:
             # TODO
             pass
 
 
-def get_schedule(msg):
+def get_schedule(msg, user_query):
     schedule_keyboard = telebot.types.ReplyKeyboardMarkup()
     for schedule in schedules.keys():
         schedule_keyboard.add(telebot.types.KeyboardButton(schedule))
@@ -228,67 +235,55 @@ def get_schedule(msg):
     bot.send_message(msg.chat.id, 'Почти закончили. Какой график работы хочешь?\n'
                                   'Можешь выбрать несколько вариантов... Короче, ты понял.',
                      reply_markup=schedule_keyboard)
-    bot.register_next_step_handler(msg, handle_schedule)
+    bot.register_next_step_handler(msg, handle_schedule, user_query)
 
 
-def handle_schedule(msg):
-    global user_schedules
-
+def handle_schedule(msg, user_query):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
-            get_period(msg)
+            get_period(msg, user_query)
         elif msg.text in schedules.keys():
             if schedules[msg.text] is None:
-                user_schedules = set()
-                get_period(msg)
+                user_query['schedules'] = set()
+                get_period(msg, user_query)
             else:
-                user_schedules.add(schedules[msg.text])
-                bot.register_next_step_handler(msg, handle_schedule)
+                user_query['schedules'] = schedules[msg.text]
+                bot.register_next_step_handler(msg, handle_schedule, user_query)
         else:
             # TODO
             pass
 
 
-def get_period(msg):
+def get_period(msg, user_query):
     bot.send_message(msg.chat.id, 'Последний вопрос. Как часто хочешь получать новые вакансии? '
                                   'Напиши число от 1 до 30.', reply_markup=REPLY_KEYBOARD_REMOVE)
-    bot.register_next_step_handler(msg, handle_period)
+    bot.register_next_step_handler(msg, handle_period, user_query)
 
 
-def handle_period(msg):
-    global user_period
-
+def handle_period(msg, user_query):
     try:
         user_period = int(msg.text)
         assert 1 <= user_period <= 30
-        publish_vacancies(msg)
+        user_query['period'] = user_period
+        publish_vacancies(msg, user_query)
     except (ValueError, AssertionError):
         bot.reply_to(msg, 'Я же просил число от 1 до 30. Так как часто хочешь получать новые вакансии?')
-        bot.register_next_step_handler(msg, handle_period)
+        bot.register_next_step_handler(msg, handle_period, user_query)
 
 
-def publish_vacancies(msg):
+def publish_vacancies(msg, user_query):
+    # 'search_field': ['name', 'description'],
     parameters = {
-        'text': user_vacancy,
-        # 'search_field': ['name', 'description'],
-        'area': list(user_areas),
-        'period': user_period
+        'text': user_query['vacancy'],
+        'area': list(user_query['areas']),
+        'period': user_query['period']
     }
 
-    if user_experience:
-        parameters['experience'] = user_experience
-    if user_employments:
-        parameters['employment'] = list(user_employments)
-    if user_schedules:
-        parameters['schedule'] = list(user_schedules)
-    if user_salary:
-        parameters['salary'] = str(user_salary)
-    if user_only_with_salary:
-        parameters['only_with_salary'] = user_only_with_salary
+    for key, op in zip(['experience', 'employments', 'schedules', 'salary', 'only_with_salary'],
+                       [str, list, list, str, str]):
+        utils.add_key_to_dict(user_query, parameters, key, operation=op)
 
-    print(parameters)
     response = httpx.get('https://api.hh.ru/vacancies', params=parameters).json()
-    print(response)
 
     bot.send_message(msg.chat.id, "Вот, что я нашел по твоим параметрам:")
 
@@ -297,12 +292,7 @@ def publish_vacancies(msg):
         # result_string += f"{vacancy['name']}\n{vacancy['employer']['name']}\n" \
         #                  f"ЗП: {vacancy['salary']['from']}-{vacancy['salary']['to']}\n" \
         #                  f"{vacancy['alternate_url']}\n"
-        # TODO vacancy['salary']['from'] could be empty
-        bot.send_message(msg.chat.id, f"Вакансия: {vacancy['name']}\n"
-                                      f"Компания: {vacancy['employer']['name']}\n"
-                                      f"З/П: {vacancy['salary']['from']}-{vacancy['salary']['to']}\n"
-                                      f"{vacancy['alternate_url']}")
-
+        bot.send_message(msg.chat.id, utils.build_msg(vacancy))
     # bot.send_message(msg.chat.id, result_string)
 
 
