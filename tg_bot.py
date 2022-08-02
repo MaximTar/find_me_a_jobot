@@ -1,9 +1,10 @@
 import difflib
 import socket
-from typing import TypedDict
+from typing import TypedDict, Dict
 
 import httpx
 import telebot
+
 import config
 import utils
 
@@ -14,36 +15,6 @@ import utils
 bot = telebot.TeleBot(config.TOKEN)
 
 REPLY_KEYBOARD_REMOVE = telebot.types.ReplyKeyboardRemove()
-
-areas = {}
-# TODO get from request
-experiences = {
-    'Не имеет значения': None,
-    'От 1 года до 3 лет': 'between1And3',
-    'Нет опыта': 'noExperience',
-    'От 3 до 6 лет': 'between3And6',
-    'Более 6 лет': 'moreThan6'
-}
-only_with_salaries = {
-    'Не имеет значения': None,
-    'Не имеет значения, но указана': 'true'
-}
-employments = {
-    'Не имеет значения': None,
-    'Полная': 'full',
-    'Частичная': 'part',
-    'Стажировка': 'project',
-    'Проектная': 'volunteer',
-    'Волонтерство': 'probation'
-}
-schedules = {
-    'Не имеет значения': None,
-    'Полный день': 'fullDay',
-    'Сменный график': 'shift',
-    'Вахтовый метод': 'flyInFlyOut',
-    'Гибкий график': 'flexible',
-    'Удаленная работа': 'remote'
-}
 
 
 class UserQuery(TypedDict):
@@ -58,27 +29,30 @@ class UserQuery(TypedDict):
     period: int
 
 
-# user_vacancy = None
-# user_areas = set()
-# user_experience = None
-# user_salary = None
-# user_only_with_salary = None
-# user_employments = set()
-# user_schedules = set()
-# user_period = None
+class HHDicts(TypedDict):
+    areas: Dict[str, str]
+    experiences: Dict[str, str]
+    only_with_salaries: Dict[str, str]
+    employments: Dict[str, str]
+    schedules: Dict[str, str]
 
 
 @bot.message_handler(commands=['start'])
 def start(msg):
-    global areas
     # noinspection PyTypeChecker
     user_query: UserQuery = {'user_id': msg.from_user.id}
 
     try:
-        areas = utils.get_areas()
+        schedules, employments, experiences, only_with_salaries = utils.get_dictionaries()
+        hh_dicts: HHDicts = {'areas': utils.get_areas(),
+                             'experiences': experiences,
+                             'only_with_salaries': only_with_salaries,
+                             'employments': employments,
+                             'schedules': schedules}
+        # TODO save hh_dicts
         bot.send_message(msg.chat.id, 'Привет! Давай найдем тебе работу. Какие слова будем искать?',
                          reply_markup=REPLY_KEYBOARD_REMOVE)
-        bot.register_next_step_handler(msg, get_vacancy, user_query)
+        bot.register_next_step_handler(msg, get_vacancy, user_query, hh_dicts)
     except (httpx.ConnectTimeout, socket.timeout):
         # TODO catch requests.exceptions.ConnectTimeout
         bot.send_message(msg.chat.id, 'У меня какие-то проблемы. Подожди немного, я попробую еще раз.',
@@ -86,20 +60,20 @@ def start(msg):
         start(msg)
 
 
-def get_vacancy(msg, user_query):
+def get_vacancy(msg, user_query, hh_dicts):
     user_query['vacancy'] = msg.text
     bot.reply_to(msg, 'Записал. Где будем искать? Напиши мне город или страну. '
                       'Можно несколько, но тогда пиши через запятую.')
-    bot.register_next_step_handler(msg, get_area, user_query)
+    bot.register_next_step_handler(msg, get_area, user_query, hh_dicts)
 
 
-def get_area(msg, user_query):
+def get_area(msg, user_query, hh_dicts):
     suggested_areas = []
 
     # TODO check if user wants only remote work
 
     for word in msg.text.split(','):
-        if word.lower() not in areas.keys():
+        if word.lower() not in hh_dicts['areas'].keys():
             # let's suggest
             # TODO catch httpx.ConnectTimeout
             # try:
@@ -116,16 +90,16 @@ def get_area(msg, user_query):
                     suggested_areas.append(item['text'])
             else:
                 # last try
-                words = difflib.get_close_matches(word.lower(), areas.keys(), n=1)
+                words = difflib.get_close_matches(word.lower(), hh_dicts['areas'].keys(), n=1)
                 if words:
                     # noinspection PyUnresolvedReferences
                     suggested_areas.append(words[0].title())
                 else:
                     bot.reply_to(msg, 'Не разобрал. Повтори, пожалуйста.')
                     # not sure if this is ok
-                    return bot.register_next_step_handler(msg, get_area, user_query)
+                    return bot.register_next_step_handler(msg, get_area, user_query, hh_dicts)
         else:
-            user_query['areas'] = areas[word.lower()]
+            user_query['areas'] = hh_dicts['areas'][word.lower()]
 
     if suggested_areas:
         suggested_areas_keyboard = telebot.types.ReplyKeyboardMarkup()
@@ -136,119 +110,119 @@ def get_area(msg, user_query):
         bot.send_message(msg.chat.id, 'Я кое-что не разобрал, позволь уточню.'
                                       'Как закончишь - жми "Далее" в конце списка.',
                          reply_markup=suggested_areas_keyboard)
-        bot.register_next_step_handler(msg, handle_suggested_areas, user_query)
+        bot.register_next_step_handler(msg, handle_suggested_areas, user_query, hh_dicts)
     else:
-        get_experience(msg, user_query)
+        get_experience(msg, user_query, hh_dicts)
 
 
-def handle_suggested_areas(msg, user_query):
+def handle_suggested_areas(msg, user_query, hh_dicts):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
-            get_experience(msg, user_query)
-        elif msg.text.lower() in areas.keys():
-            user_query['areas'] = areas[msg.text.lower()]
-            bot.register_next_step_handler(msg, handle_suggested_areas, user_query)
+            get_experience(msg, user_query, hh_dicts)
+        elif msg.text.lower() in hh_dicts['areas'].keys():
+            user_query['areas'] = hh_dicts['areas'][msg.text.lower()]
+            bot.register_next_step_handler(msg, handle_suggested_areas, user_query, hh_dicts)
         else:
             # TODO
             pass
 
 
-def get_experience(msg, user_query):
+def get_experience(msg, user_query, hh_dicts):
     experience_keyboard = telebot.types.ReplyKeyboardMarkup()
-    for experience in experiences.keys():
+    for experience in hh_dicts['experiences'].keys():
         experience_keyboard.add(telebot.types.KeyboardButton(experience))
 
     bot.send_message(msg.chat.id, 'Теперь скажи, какой у тебя опыт?',
                      reply_markup=experience_keyboard)
-    bot.register_next_step_handler(msg, handle_experience, user_query)
+    bot.register_next_step_handler(msg, handle_experience, user_query, hh_dicts)
 
 
-def handle_experience(msg, user_query):
-    if msg.chat.type == 'private' and msg.text in experiences:
-        user_query['experience'] = experiences[msg.text]
-        get_salary(msg, user_query)
+def handle_experience(msg, user_query, hh_dicts):
+    if msg.chat.type == 'private' and msg.text in hh_dicts['experiences']:
+        user_query['experience'] = hh_dicts['experiences'][msg.text]
+        get_salary(msg, user_query, hh_dicts)
     else:
         # TODO
         pass
 
 
-def get_salary(msg, user_query):
+def get_salary(msg, user_query, hh_dicts):
     salary_keyboard = telebot.types.ReplyKeyboardMarkup()
-    for salary in only_with_salaries.keys():
+    for salary in hh_dicts['only_with_salaries'].keys():
         salary_keyboard.add(telebot.types.KeyboardButton(salary))
 
     bot.send_message(msg.chat.id, 'Отлично. А сколько в рублях ты хочешь получать?',
                      reply_markup=salary_keyboard)
-    bot.register_next_step_handler(msg, handle_salary, user_query)
+    bot.register_next_step_handler(msg, handle_salary, user_query, hh_dicts)
 
 
-def handle_salary(msg, user_query):
+def handle_salary(msg, user_query, hh_dicts):
     if msg.chat.type == 'private':
-        if msg.text in only_with_salaries.keys():
-            user_query['only_with_salary'] = only_with_salaries[msg.text]
-            get_employment(msg, user_query)
+        if msg.text in hh_dicts['only_with_salaries'].keys():
+            user_query['only_with_salary'] = hh_dicts['only_with_salaries'][msg.text]
+            get_employment(msg, user_query, hh_dicts)
         else:
             try:
                 user_salary = int(msg.text)
                 assert user_salary > 0
                 user_query['salary'] = user_salary
-                get_employment(msg, user_query)
+                get_employment(msg, user_query, hh_dicts)
             except (ValueError, AssertionError):
                 bot.reply_to(msg, 'Похоже, ты где-то опечатался. Так какую зарплату ты хочешь?')
-                bot.register_next_step_handler(msg, get_salary, user_query)
+                bot.register_next_step_handler(msg, get_salary, user_query, hh_dicts)
 
 
-def get_employment(msg, user_query):
+def get_employment(msg, user_query, hh_dicts):
     employment_keyboard = telebot.types.ReplyKeyboardMarkup()
-    for employment in employments.keys():
+    for employment in hh_dicts['employments'].keys():
         employment_keyboard.add(telebot.types.KeyboardButton(employment))
     employment_keyboard.add(telebot.types.KeyboardButton('Далее'))
 
     bot.send_message(msg.chat.id, 'Какой тип занятости тебя интересуеут?\n'
                                   'Можешь выбрать несколько вариантов, потом жми "Далее".',
                      reply_markup=employment_keyboard)
-    bot.register_next_step_handler(msg, handle_employment, user_query)
+    bot.register_next_step_handler(msg, handle_employment, user_query, hh_dicts)
 
 
-def handle_employment(msg, user_query):
+def handle_employment(msg, user_query, hh_dicts):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
-            get_schedule(msg, user_query)
-        elif msg.text in employments.keys():
-            if employments[msg.text] is None:
+            get_schedule(msg, user_query, hh_dicts)
+        elif msg.text in hh_dicts['employments'].keys():
+            if hh_dicts['employments'][msg.text] is None:
                 user_query['employments'] = set()
-                get_schedule(msg, user_query)
+                get_schedule(msg, user_query, hh_dicts)
             else:
-                user_query['employments'] = employments[msg.text]
-                bot.register_next_step_handler(msg, handle_employment, user_query)
+                user_query['employments'] = hh_dicts['employments'][msg.text]
+                bot.register_next_step_handler(msg, handle_employment, user_query, hh_dicts)
         else:
             # TODO
             pass
 
 
-def get_schedule(msg, user_query):
+def get_schedule(msg, user_query, hh_dicts):
     schedule_keyboard = telebot.types.ReplyKeyboardMarkup()
-    for schedule in schedules.keys():
+    for schedule in hh_dicts['schedules'].keys():
         schedule_keyboard.add(telebot.types.KeyboardButton(schedule))
     schedule_keyboard.add(telebot.types.KeyboardButton('Далее'))
 
     bot.send_message(msg.chat.id, 'Почти закончили. Какой график работы хочешь?\n'
                                   'Можешь выбрать несколько вариантов... Короче, ты понял.',
                      reply_markup=schedule_keyboard)
-    bot.register_next_step_handler(msg, handle_schedule, user_query)
+    bot.register_next_step_handler(msg, handle_schedule, user_query, hh_dicts)
 
 
-def handle_schedule(msg, user_query):
+def handle_schedule(msg, user_query, hh_dicts):
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
             get_period(msg, user_query)
-        elif msg.text in schedules.keys():
-            if schedules[msg.text] is None:
+        elif msg.text in hh_dicts['schedules'].keys():
+            if hh_dicts['schedules'][msg.text] is None:
                 user_query['schedules'] = set()
                 get_period(msg, user_query)
             else:
-                user_query['schedules'] = schedules[msg.text]
-                bot.register_next_step_handler(msg, handle_schedule, user_query)
+                user_query['schedules'] = hh_dicts['schedules'][msg.text]
+                bot.register_next_step_handler(msg, handle_schedule, user_query, hh_dicts)
         else:
             # TODO
             pass
@@ -281,7 +255,7 @@ def publish_vacancies(msg, user_query):
 
     for key, op in zip(['experience', 'employments', 'schedules', 'salary', 'only_with_salary'],
                        [str, list, list, str, str]):
-        utils.add_key_to_dict(user_query, parameters, key, operation=op)
+        utils.copy_pair(user_query, parameters, key, operation=op)
 
     response = httpx.get('https://api.hh.ru/vacancies', params=parameters).json()
 
