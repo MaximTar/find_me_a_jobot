@@ -1,9 +1,14 @@
+import json
 from typing import Tuple, Dict
 
 import httpx
 
+from dicts import HHDicts
+
 
 # TODO wrap httpx.get with try
+
+
 def get_areas() -> Dict[str, str]:
     response = httpx.get('https://api.hh.ru/areas').json()
     areas = {}
@@ -21,7 +26,7 @@ def get_areas() -> Dict[str, str]:
 def get_dictionaries() -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     response = httpx.get('https://api.hh.ru/dictionaries').json()
     # schedules, employments, experiences, only_with_salaries
-    dicts = {}, {}, {}, {'Не имеет значения, но указана': 'true'}
+    dicts = {}, {}, {}, {'Не имеет значения, но зарплата указана': 'true'}
 
     for dct, key in zip(dicts, ['schedule', 'employment', 'experience', None]):
         # noinspection PyTypeChecker
@@ -61,3 +66,14 @@ def build_msg(vacancy):
     alternate_url = vacancy['alternate_url'] if check_key(vacancy, 'alternate_url') else 'Ссылка не найдена'
 
     return f"Вакансия: {vacancy_name}\nКомпания: {employer_name}\nЗ/П: {salary}\n{alternate_url}"
+
+
+def update_hh_dicts():
+    schedules, employments, experiences, only_with_salaries = get_dictionaries()
+    hh_dicts: HHDicts = {'areas': get_areas(),
+                         'experiences': experiences,
+                         'only_with_salaries': only_with_salaries,
+                         'employments': employments,
+                         'schedules': schedules}
+    with open('hh_dicts.json', 'w', encoding='utf-8') as json_file:
+        json.dump(hh_dicts, json_file, ensure_ascii=False, indent=4)
