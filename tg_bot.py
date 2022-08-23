@@ -85,7 +85,6 @@ def callback_query(call):
         # TODO check condition - it's not good (could make surrogate PK and update by id)
         eval(f"update_{key}({chat_id}, {[key.upper()]},"
              f" \"USER_ID = {repr(str(chat_id))} AND VACANCY = {repr(str(vacancy))}\")")
-        bot.answer_callback_query(callback_query_id=call.id, show_alert=True, text='Обновил!')
     elif call.data.startswith("['delete'"):
         vacancy = ast.literal_eval(call.data)[1]
         with contextlib.closing(create_connection(config.DB_NAME)) as connection:
@@ -125,6 +124,7 @@ def get_vacancy(msg, user_query, hh_dicts, user_text_query):
 def update_vacancy(chat_id, columns, condition):
     def update(msg):
         update_both_tables(columns, [msg.text], condition)
+        bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
 
     bot.register_next_step_handler(bot.send_message(chat_id, 'Какие слова будем искать теперь?'), update)
 
@@ -189,6 +189,7 @@ def get_areas(msg, user_query=None, hh_dicts=None, user_text_query=None,
             get_experience(msg, user_query, hh_dicts, user_text_query)
         else:
             update_both_tables(upd_cols, [query_areas], upd_cond, ', '.join(text_query_areas))
+            bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
 
 
 def update_areas(chat_id, columns, condition):
@@ -208,6 +209,7 @@ def handle_suggested_areas(msg, user_query=None, hh_dicts=None, user_text_query=
                 get_experience(msg, user_query, hh_dicts, user_text_query)
             else:
                 update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
+                bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
         elif msg.text.lower() in hh_dicts['areas'].keys():
             if not update:
                 user_query['areas'].add(hh_dicts['areas'][msg.text.lower()])
@@ -252,6 +254,7 @@ def handle_experience(msg, user_query=None, hh_dicts=None, user_text_query=None,
             get_salary(msg, user_query, hh_dicts, user_text_query)
         else:
             update_both_tables(upd_cols, [hh_dicts['experiences'][msg.text]], upd_cond, [msg.text])
+            bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
     else:
         else_function(msg, bot.register_next_step_handler,
                       msg, handle_experience, user_query, hh_dicts, user_text_query,
@@ -298,9 +301,9 @@ def handle_salary(msg, user_query=None, hh_dicts=None, user_text_query=None,
                     update_from_list(connection, config.QUERIES_TABLE_NAME, ['ONLY_WITH_SALARY'],
                                      [hh_dicts['only_with_salaries'][msg.text]], upd_cond)
                     update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [msg.text], upd_cond)
+                bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
         else:
             try:
-
                 user_salary = int(msg.text)
                 assert user_salary > 0
                 if not update:
@@ -315,6 +318,7 @@ def handle_salary(msg, user_query=None, hh_dicts=None, user_text_query=None,
                         update_from_list(connection, config.QUERIES_TABLE_NAME, ['ONLY_WITH_SALARY'],
                                          [None], upd_cond)
                         update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [msg.text], upd_cond)
+                    bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
             except (ValueError, AssertionError):
                 get_salary(bot.reply_to(msg, 'Похоже, тут где-то опечатка.\n'
                                              'Так какую зарплату ты хочешь?',
@@ -359,6 +363,7 @@ def handle_employment(msg, user_query=None, hh_dicts=None, user_text_query=None,
                 get_schedules(msg, user_query, hh_dicts, user_text_query)
             else:
                 update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
+                bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
         elif msg.text in hh_dicts['employments'].keys():
             if hh_dicts['employments'][msg.text] is None:
                 if not update:
@@ -367,6 +372,7 @@ def handle_employment(msg, user_query=None, hh_dicts=None, user_text_query=None,
                     get_schedules(msg, user_query, hh_dicts, user_text_query)
                 else:
                     update_both_tables(upd_cols, [None], upd_cond, [msg.text])
+                    bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
             else:
                 if not update:
                     user_query['employments'].add(hh_dicts['employments'][msg.text])
@@ -419,6 +425,7 @@ def handle_schedule(msg, user_query=None, hh_dicts=None, user_text_query=None,
                 get_subscription(msg, user_query, user_text_query)
             else:
                 update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
+                bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
         elif msg.text in hh_dicts['schedules'].keys():
             if hh_dicts['schedules'][msg.text] is None:
                 if not update:
@@ -427,6 +434,7 @@ def handle_schedule(msg, user_query=None, hh_dicts=None, user_text_query=None,
                     get_subscription(msg, user_query, user_text_query)
                 else:
                     update_both_tables(upd_cols, [None], upd_cond, [msg.text])
+                    bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
             else:
                 if not update:
                     user_query['schedules'].add(hh_dicts['schedules'][msg.text])
@@ -490,6 +498,7 @@ def handle_period(msg, user_query, user_text_query, update=False, upd_cols=None,
             publish_vacancies(msg, user_query, user_text_query, subscribe)
         else:
             update_both_tables(upd_cols, [user_period], upd_cond)
+            bot.send_message(msg.chat.id, 'Обновил!', reply_markup=REPLY_KEYBOARD_REMOVE)
     except (ValueError, AssertionError):
         bot.reply_to(msg, 'Я же просил число от 1 до 30.')
         bot.register_next_step_handler(msg, handle_period, user_query, user_text_query,
