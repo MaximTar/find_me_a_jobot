@@ -55,3 +55,13 @@ class UserTextQuery(TypedDict, total=False):
     employments: Union[set, str]
     schedules: str
     period: Union[int, str]
+
+
+def create_user_text_query(values):
+    utq_keys = UserTextQuery.__annotations__.keys()
+    if len(values) == len(utq_keys):
+        user_text_query: UserTextQuery = {k: v for k, v in zip(utq_keys, values)}
+        return user_text_query
+    else:
+        # TODO log
+        pass

@@ -1,7 +1,6 @@
 import ast
 import contextlib
 import difflib
-import json
 import socket
 
 import httpx
@@ -12,7 +11,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import config
 import hh_utils
 from db_utils import insert_from_dict, create_connection, simple_select, update_from_list, delete
-from dicts import UserQuery, create_user_query, get_user_query_russian_text, UserTextQuery
+from dicts import UserQuery, get_user_query_russian_text, UserTextQuery, create_user_text_query
 
 # TODO ELSES
 # TODO add logging
@@ -62,8 +61,9 @@ def callback_query(call):
     elif call.data.startswith("['uv_'"):
         vacancy = ast.literal_eval(call.data)[1]
         with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-            text_fields = create_user_query(*simple_select(connection, config.TEXT_QUERIES_TABLE_NAME, '*',
-                                                           condition=f'USER_ID = {chat_id} and VACANCY = "{vacancy}"'))
+            text_fields = create_user_text_query(*simple_select(connection, config.TEXT_QUERIES_TABLE_NAME, '*',
+                                                                condition=f'USER_ID = {chat_id} '
+                                                                          f'and VACANCY = "{vacancy}"'))
         update_vacancy_keyboard = InlineKeyboardMarkup()
         uq_russian = get_user_query_russian_text()
         for key in UserQuery.__annotations__.keys():
