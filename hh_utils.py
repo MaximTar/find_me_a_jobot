@@ -3,6 +3,7 @@ from typing import Tuple, Dict
 
 import httpx
 
+from config import HH_DICTS_FILENAME
 from dicts import HHDicts
 
 
@@ -75,5 +76,11 @@ def update_hh_dicts():
                          'only_with_salaries': only_with_salaries,
                          'employments': employments,
                          'schedules': schedules}
-    with open('hh_dicts.json', 'w', encoding='utf-8') as json_file:
+    with open(HH_DICTS_FILENAME, 'w', encoding='utf-8') as json_file:
         json.dump(hh_dicts, json_file, ensure_ascii=False, indent=4)
+
+
+def get_hh_dicts():
+    with open(HH_DICTS_FILENAME, encoding='utf-8') as json_file:
+        hh_dicts = json.load(json_file)
+    return hh_dicts

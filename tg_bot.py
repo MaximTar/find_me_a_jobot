@@ -85,6 +85,7 @@ def callback_query(call):
         # TODO check condition - it's not good (could make surrogate PK and update by id)
         eval(f"update_{key}({chat_id}, {[key.upper()]},"
              f" \"USER_ID = {repr(str(chat_id))} AND VACANCY = {repr(str(vacancy))}\")")
+        bot.answer_callback_query(callback_query_id=call.id, show_alert=True, text='Обновил!')
     elif call.data.startswith("['delete'"):
         vacancy = ast.literal_eval(call.data)[1]
         with contextlib.closing(create_connection(config.DB_NAME)) as connection:
@@ -100,8 +101,7 @@ def start(msg):
     user_text_query: UserTextQuery = {'user_id': msg.from_user.id}
 
     try:
-        with open('hh_dicts.json', encoding='utf-8') as json_file:
-            hh_dicts = json.load(json_file)
+        hh_dicts = hh_utils.get_hh_dicts()
         bot.send_message(msg.chat.id, 'Привет! Давай найдем тебе работу. Какие ключевые слова будем искать?',
                          reply_markup=REPLY_KEYBOARD_REMOVE)
         bot.register_next_step_handler(msg, get_vacancy, user_query, hh_dicts, user_text_query)
@@ -124,9 +124,7 @@ def get_vacancy(msg, user_query, hh_dicts, user_text_query):
 
 def update_vacancy(chat_id, columns, condition):
     def update(msg):
-        with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-            update_from_list(connection, config.QUERIES_TABLE_NAME, columns, [msg.text], condition)
-            update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, columns, [msg.text], condition)
+        update_both_tables(columns, [msg.text], condition)
 
     bot.register_next_step_handler(bot.send_message(chat_id, 'Какие слова будем искать теперь?'), update)
 
@@ -190,15 +188,11 @@ def get_areas(msg, user_query=None, hh_dicts=None, user_text_query=None,
         if not update:
             get_experience(msg, user_query, hh_dicts, user_text_query)
         else:
-            with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [query_areas], upd_cond)
-                update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, ', '.join(text_query_areas),
-                                 upd_cond)
+            update_both_tables(upd_cols, [query_areas], upd_cond, ', '.join(text_query_areas))
 
 
 def update_areas(chat_id, columns, condition):
-    with open('hh_dicts.json', encoding='utf-8') as json_file:
-        hh_dicts = json.load(json_file)
+    hh_dicts = hh_utils.get_hh_dicts()
     bot.register_next_step_handler(bot.send_message(chat_id, 'Где будем искать работу теперь? '
                                                              'Точно так же напиши мне город или страну. '
                                                              'И снова можно несколько, но через запятую.'),
@@ -209,16 +203,11 @@ def update_areas(chat_id, columns, condition):
 def handle_suggested_areas(msg, user_query=None, hh_dicts=None, user_text_query=None,
                            update=False, upd_cols=None, upd_cond=None):
     if msg.chat.type == 'private':
-        print(msg.text)
         if msg.text == 'Далее':
             if not update:
-                print("not update")
                 get_experience(msg, user_query, hh_dicts, user_text_query)
             else:
-                with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                    update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [user_query], upd_cond)
-                    update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols,
-                                     [', '.join(user_text_query)], upd_cond)
+                update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
         elif msg.text.lower() in hh_dicts['areas'].keys():
             if not update:
                 user_query['areas'].add(hh_dicts['areas'][msg.text.lower()])
@@ -230,8 +219,9 @@ def handle_suggested_areas(msg, user_query=None, hh_dicts=None, user_text_query=
                 bot.register_next_step_handler(msg, handle_suggested_areas, user_query,
                                                hh_dicts, user_text_query, update, upd_cols, upd_cond)
         else:
-            # TODO
-            pass
+            else_function(msg, bot.register_next_step_handler,
+                          msg, handle_suggested_areas, user_query, hh_dicts, user_text_query,
+                          update, upd_cols, upd_cond)
 
 
 def get_experience(msg, user_query=None, hh_dicts=None, user_text_query=None,
@@ -249,9 +239,7 @@ def get_experience(msg, user_query=None, hh_dicts=None, user_text_query=None,
 
 
 def update_experience(chat_id, columns, condition):
-    with open('hh_dicts.json', encoding='utf-8') as json_file:
-        hh_dicts = json.load(json_file)
-
+    hh_dicts = hh_utils.get_hh_dicts()
     get_experience(chat_id, None, hh_dicts, None, True, columns, condition)
 
 
@@ -263,13 +251,11 @@ def handle_experience(msg, user_query=None, hh_dicts=None, user_text_query=None,
             user_text_query['experience'] = msg.text
             get_salary(msg, user_query, hh_dicts, user_text_query)
         else:
-            with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols,
-                                 [hh_dicts['experiences'][msg.text]], upd_cond)
-                update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [msg.text], upd_cond)
+            update_both_tables(upd_cols, [hh_dicts['experiences'][msg.text]], upd_cond, [msg.text])
     else:
-        # TODO
-        pass
+        else_function(msg, bot.register_next_step_handler,
+                      msg, handle_experience, user_query, hh_dicts, user_text_query,
+                      update, upd_cols, upd_cond)
 
 
 def get_salary(msg, user_query=None, hh_dicts=None, user_text_query=None,
@@ -291,9 +277,7 @@ def get_salary(msg, user_query=None, hh_dicts=None, user_text_query=None,
 
 
 def update_salary(chat_id, columns, condition):
-    with open('hh_dicts.json', encoding='utf-8') as json_file:
-        hh_dicts = json.load(json_file)
-
+    hh_dicts = hh_utils.get_hh_dicts()
     get_salary(chat_id, None, hh_dicts, None, True, columns, condition)
 
 
@@ -363,9 +347,7 @@ def get_employments(msg, user_query=None, hh_dicts=None, user_text_query=None,
 
 
 def update_employments(chat_id, columns, condition):
-    with open('hh_dicts.json', encoding='utf-8') as json_file:
-        hh_dicts = json.load(json_file)
-
+    hh_dicts = hh_utils.get_hh_dicts()
     get_employments(chat_id, None, hh_dicts, None, True, columns, condition)
 
 
@@ -376,10 +358,7 @@ def handle_employment(msg, user_query=None, hh_dicts=None, user_text_query=None,
             if not update:
                 get_schedules(msg, user_query, hh_dicts, user_text_query)
             else:
-                with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                    update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [user_query], upd_cond)
-                    update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols,
-                                     [', '.join(user_text_query)], upd_cond)
+                update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
         elif msg.text in hh_dicts['employments'].keys():
             if hh_dicts['employments'][msg.text] is None:
                 if not update:
@@ -387,9 +366,7 @@ def handle_employment(msg, user_query=None, hh_dicts=None, user_text_query=None,
                     user_text_query['employments'] = msg.text
                     get_schedules(msg, user_query, hh_dicts, user_text_query)
                 else:
-                    with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                        update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [None], upd_cond)
-                        update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [msg.text], upd_cond)
+                    update_both_tables(upd_cols, [None], upd_cond, [msg.text])
             else:
                 if not update:
                     user_query['employments'].add(hh_dicts['employments'][msg.text])
@@ -401,8 +378,9 @@ def handle_employment(msg, user_query=None, hh_dicts=None, user_text_query=None,
                                                update, upd_cols, upd_cond)
 
         else:
-            # TODO
-            pass
+            else_function(msg, bot.register_next_step_handler,
+                          msg, handle_employment, user_query, hh_dicts, user_text_query,
+                          update, upd_cols, upd_cond)
 
 
 def get_schedules(msg, user_query=None, hh_dicts=None, user_text_query=None,
@@ -429,9 +407,7 @@ def get_schedules(msg, user_query=None, hh_dicts=None, user_text_query=None,
 
 
 def update_schedules(chat_id, columns, condition):
-    with open('hh_dicts.json', encoding='utf-8') as json_file:
-        hh_dicts = json.load(json_file)
-
+    hh_dicts = hh_utils.get_hh_dicts()
     get_schedules(chat_id, None, hh_dicts, None, True, columns, condition)
 
 
@@ -440,24 +416,17 @@ def handle_schedule(msg, user_query=None, hh_dicts=None, user_text_query=None,
     if msg.chat.type == 'private':
         if msg.text == 'Далее':
             if not update:
-                # get_period(msg, user_query, user_text_query)
                 get_subscription(msg, user_query, user_text_query)
             else:
-                with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                    update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [user_query], upd_cond)
-                    update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols,
-                                     [', '.join(user_text_query)], upd_cond)
+                update_both_tables(upd_cols, [user_query], upd_cond, [', '.join(user_text_query)])
         elif msg.text in hh_dicts['schedules'].keys():
             if hh_dicts['schedules'][msg.text] is None:
                 if not update:
                     user_query['schedules'] = None
                     user_text_query['schedules'] = msg.text
-                    # get_period(msg, user_query, user_text_query)
                     get_subscription(msg, user_query, user_text_query)
                 else:
-                    with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                        update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [None], upd_cond)
-                        update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [msg.text], upd_cond)
+                    update_both_tables(upd_cols, [None], upd_cond, [msg.text])
             else:
                 if not update:
                     user_query['schedules'].add(hh_dicts['schedules'][msg.text])
@@ -468,8 +437,9 @@ def handle_schedule(msg, user_query=None, hh_dicts=None, user_text_query=None,
                 bot.register_next_step_handler(msg, handle_schedule, user_query, hh_dicts, user_text_query,
                                                update, upd_cols, upd_cond)
         else:
-            # TODO
-            pass
+            else_function(msg, bot.register_next_step_handler,
+                          msg, handle_schedule, user_query, hh_dicts, user_text_query,
+                          update, upd_cols, upd_cond)
 
 
 def get_subscription(msg, user_query, user_text_query):
@@ -491,8 +461,8 @@ def handle_subscription(msg, user_query, user_text_query):
         bot.register_next_step_handler(msg, handle_period, user_query, user_text_query,
                                        False, None, None, False)
     else:
-        # TODO
-        pass
+        else_function(msg, bot.register_next_step_handler,
+                      msg, handle_subscription, user_query, user_text_query)
 
 
 def get_period(msg, user_query, user_text_query, update=False, upd_cols=None, upd_cond=None, subscribe=False):
@@ -519,11 +489,9 @@ def handle_period(msg, user_query, user_text_query, update=False, upd_cols=None,
             user_text_query['period'] = user_period
             publish_vacancies(msg, user_query, user_text_query, subscribe)
         else:
-            with contextlib.closing(create_connection(config.DB_NAME)) as connection:
-                update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, [user_period], upd_cond)
-                update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, [user_period], upd_cond)
+            update_both_tables(upd_cols, [user_period], upd_cond)
     except (ValueError, AssertionError):
-        bot.reply_to(msg, 'Я же просил число от 1 до 30. Так как часто хочешь получать новые вакансии?')
+        bot.reply_to(msg, 'Я же просил число от 1 до 30.')
         bot.register_next_step_handler(msg, handle_period, user_query, user_text_query,
                                        update, upd_cols, upd_cond, subscribe)
 
@@ -593,6 +561,23 @@ def mailing():
                 update_from_list(connection, config.QUERIES_TABLE_NAME, ['COUNTER'], [counter],
                                  f"USER_ID = {repr(str(user_query['user_id']))} "
                                  f"AND VACANCY = {repr(str(user_query['vacancy']))}")
+
+
+def update_both_tables(upd_cols, upd_values, upd_cond, upd_txt_values=None):
+    with contextlib.closing(create_connection(config.DB_NAME)) as connection:
+        update_from_list(connection, config.QUERIES_TABLE_NAME, upd_cols, upd_values, upd_cond)
+        if upd_txt_values:
+            update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, upd_txt_values, upd_cond)
+        else:
+            update_from_list(connection, config.TEXT_QUERIES_TABLE_NAME, upd_cols, upd_values, upd_cond)
+
+
+def else_function(msg, func, *func_args):
+    if msg.text == '/start':
+        start(msg)
+    else:
+        bot.reply_to(msg, 'Такого не понимаю.\nТыкай на кнопки.')
+        func(*func_args)
 
 
 # update hh_dicts and send vacancies everyday

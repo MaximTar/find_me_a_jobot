@@ -1,11 +1,11 @@
 import sqlite3
 
 import config
-from dicts import UserQuery
+from dicts import UserQuery, UserTextQuery
 
 # str(v.__name__).upper()
 QUERY_FIELDS = {str(k).upper(): 'TEXT' for k in UserQuery.__annotations__.keys()}  # for table creation
-TEXT_QUERY_FIELDS = {str(k).upper(): 'TEXT' for k in UserQuery.__annotations__.keys()}  # for table creation
+TEXT_QUERY_FIELDS = {str(k).upper(): 'TEXT' for k in UserTextQuery.__annotations__.keys()}  # for table creation
 
 
 # TODO logging, tries
@@ -83,7 +83,10 @@ def update_from_dict(connection, table_name, updated_dict, condition):
 
 conn = create_connection(config.DB_NAME)
 create_table(conn, config.QUERIES_TABLE_NAME, QUERY_FIELDS)
-conn.cursor().execute(f"ALTER TABLE {config.QUERIES_TABLE_NAME} ADD COLUMN COUNTER")
-conn.commit()
+try:
+    conn.cursor().execute(f"ALTER TABLE {config.QUERIES_TABLE_NAME} ADD COLUMN COUNTER")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass
 create_table(conn, config.TEXT_QUERIES_TABLE_NAME, TEXT_QUERY_FIELDS)
 conn.close()
